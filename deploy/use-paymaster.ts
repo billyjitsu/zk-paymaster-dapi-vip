@@ -32,31 +32,40 @@ function getGreeter(hre: HardhatRuntimeEnvironment, wallet: Wallet) {
 
 // Wallet private key
 // ⚠️ Never commit private keys to file tracking history, or your account could be compromised.
-const EMPTY_WALLET_PRIVATE_KEY = process.env.EMPTY_WALLET_PRIVATE_KEY || "";
+const EMPTY_WALLET_W_NFT_PRIVATE_KEY = process.env.EMPTY_WALLET_W_NFT_PRIVATE_KEY || "";
+const EMPTY_WALLET_NO_NFT_PRIVATE_KEY = process.env.EMPTY_WALLET_NO_NFT_PRIVATE_KEY || "";
+
 export default async function (hre: HardhatRuntimeEnvironment) {
     const provider = new Provider("https://testnet.era.zksync.dev");
-    const emptyWallet = new Wallet(EMPTY_WALLET_PRIVATE_KEY, provider);
+    const emptyWalletWithNFT = new Wallet(EMPTY_WALLET_W_NFT_PRIVATE_KEY, provider);
+    const emptyWalletNONFT = new Wallet(EMPTY_WALLET_NO_NFT_PRIVATE_KEY, provider);
 
   // Obviously this step is not required, but it is here purely to demonstrate that indeed the wallet has no ether.
-  const ethBalance = await emptyWallet.getBalance();
+  const ethBalance = await emptyWalletWithNFT.getBalance();
     if (!ethBalance.eq(0)) {
-      throw new Error("The wallet is not empty");
+      throw new Error("The wallet with NFT is not empty");
+    }
+  
+  const ethBalanceNoNFT = await emptyWalletNONFT.getBalance();
+    if (!ethBalanceNoNFT.eq(0)) {
+      throw new Error("The No NFT wallet is not empty");
     }
 
-  const erc20Balance = await emptyWallet.getBalance(TOKEN_ADDRESS);
-  console.log(`ERC20 balance of the user before tx: ${erc20Balance}`);
+  const erc20Balance = await emptyWalletWithNFT.getBalance(TOKEN_ADDRESS);
+  console.log(`ERC20 balance of the wallet with the NFT before tx: ${erc20Balance}`);
 
-  const greeter = getGreeter(hre, emptyWallet);
-  const erc20 = getToken(hre, emptyWallet);
-  const erc1155 = getNFT(hre, emptyWallet);
+  const erc20BalanceNoNFT = await emptyWalletNONFT.getBalance(TOKEN_ADDRESS);
+  console.log(`ERC20 balance of the wallet without the NFT before tx: ${erc20BalanceNoNFT}`);
 
-  const erc1155Balance = await erc1155.balanceOf(emptyWallet,1);
-  console.log(`ERC1155 balance of the user before tx: ${erc1155Balance}`);
+  console.log("********** Transaction for Wallet holding NFT **********");
+  /********** Transaction for Wallet with NFT **********/
+  const greeter = getGreeter(hre, emptyWalletWithNFT);
+  const erc20 = getToken(hre, emptyWalletWithNFT);
 
   const gasPrice = await provider.getGasPrice();
 
   // Loading the Paymaster Contract
-  const deployer = new Deployer(hre, emptyWallet);
+  const deployer = new Deployer(hre, emptyWalletWithNFT);
   const paymasterArtifact = await deployer.loadArtifact("MyPaymaster");
 
   const PaymasterFactory = new ContractFactory(
@@ -68,7 +77,7 @@ export default async function (hre: HardhatRuntimeEnvironment) {
 
   // Estimate gas fee for the transaction
   const gasLimit = await greeter.estimateGas.setGreeting(
-    "new updated greeting",
+    "This is a Free Transaction",
     {
       customData: {
         gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
@@ -96,13 +105,6 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     "0x946E3232Cc18E812895A8e83CaE3d0caA241C2AB"
   );
 
-  // Checks old allowance (for testing purposes):
-  const checkSetAllowance = await erc20.allowance(
-    emptyWallet.address,
-    PAYMASTER_ADDRESS
-  );
-  console.log(`ERC20 allowance for paymaster : ${checkSetAllowance}`);
-
   console.log(`ETH/USD dAPI Value: ${ETHUSD}`);
   console.log(`USDC/USD dAPI Value: ${USDCUSD}`);
 
@@ -110,7 +112,7 @@ export default async function (hre: HardhatRuntimeEnvironment) {
   const usdFee = fee.mul(ETHUSD).div(USDCUSD);
   console.log(`Estimated USD FEE: ${usdFee}`);
 
-  console.log(`Current message is: ${await greeter.greet()}`);
+  console.log(`--Original message is: ${await greeter.greet()}`);
 
   // Encoding the "ApprovalBased" paymaster flow's input
   const paymasterParams = utils.getPaymasterParams(PAYMASTER_ADDRESS, {
@@ -124,8 +126,8 @@ export default async function (hre: HardhatRuntimeEnvironment) {
 
   await (
     await greeter
-      .connect(emptyWallet)
-      .setGreeting(`new greeting updated at ${new Date().toUTCString()}`, {
+      .connect(emptyWalletWithNFT)
+      .setGreeting("This is a Free Transaction", {
         // specify gas values
         maxFeePerGas: gasPrice,
         maxPriorityFeePerGas: 0,
@@ -137,12 +139,112 @@ export default async function (hre: HardhatRuntimeEnvironment) {
         },
       })
   ).wait();
+  /************************************************/
 
-  const newErc20Balance = await emptyWallet.getBalance(TOKEN_ADDRESS);
+  console.log(`--Updated message from first wallet in contract now is: ${await greeter.greet()}`);
+  console.log("********** Transaction for Wallet without NFT **********");
 
-  console.log(`ERC20 Balance of the user after tx: ${newErc20Balance}`);
-  console.log(
-    `Transaction fee paid in ERC20 was ${erc20Balance.sub(newErc20Balance)}`
+  /********** Transaction for Wallet with out the  NFT **********/
+  const greeterNoNFT = getGreeter(hre, emptyWalletNONFT);
+  const erc20NoNFT = getToken(hre, emptyWalletNONFT);
+
+  const gasPriceNoNFT = await provider.getGasPrice();
+
+  // Loading the Paymaster Contract
+  const deployerNoNFT = new Deployer(hre, emptyWalletNONFT);
+  const paymasterArtifactNoNFT = await deployerNoNFT.loadArtifact("MyPaymaster");
+
+  const PaymasterFactoryNoNFT = new ContractFactory(
+    paymasterArtifactNoNFT.abi,
+    paymasterArtifactNoNFT.bytecode,
+    deployerNoNFT.zkWallet
   );
-  console.log(`Message in contract now is: ${await greeter.greet()}`);
+  const PaymasterContractNoNFT = PaymasterFactoryNoNFT.attach(PAYMASTER_ADDRESS);
+
+  // Estimate gas fee for the transaction
+  const gasLimitNoNFT = await greeterNoNFT.estimateGas.setGreeting(
+    "This Greeting Cost USDC",
+    {
+      customData: {
+        gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
+        paymasterParams: utils.getPaymasterParams(PAYMASTER_ADDRESS, {
+          type: "ApprovalBased",
+          token: TOKEN_ADDRESS,
+          // Set a large allowance just for estimation
+          minimalAllowance: ethers.BigNumber.from(`100000000000000000000`),
+          // Empty bytes as testnet paymaster does not use innerInput
+          innerInput: new Uint8Array(),
+        }),
+      },
+    }
+  );
+
+  // Gas estimation:
+  const feeNoNFT = gasPriceNoNFT.mul(gasLimitNoNFT.toString());
+  console.log(`Estimated ETH FEE (gasPrice * gasLimit): ${feeNoNFT}`);
+
+  // Calling the dAPI to get the ETH price:
+  const ETHUSDNONFT = await PaymasterContractNoNFT.readDapi(
+    "0x28ce555ee7a3daCdC305951974FcbA59F5BdF09b"
+  );
+  const USDCUSDNONFT = await PaymasterContractNoNFT.readDapi(
+    "0x946E3232Cc18E812895A8e83CaE3d0caA241C2AB"
+  );
+
+  // Checks old allowance (for testing purposes):
+  const checkSetAllowanceNoNFT = await erc20NoNFT.allowance(
+    emptyWalletNONFT.address,
+    PAYMASTER_ADDRESS
+  );
+
+  // Calculating the USD fee:
+  const usdFeeNoNFT = feeNoNFT.mul(ETHUSDNONFT).div(USDCUSDNONFT);
+  console.log(`Estimated USD FEE: ${usdFeeNoNFT}`);
+
+  //console.log(`Current message is: ${await greeterNoNFT.greet()}`);
+
+  // Encoding the "ApprovalBased" paymaster flow's input
+  const paymasterParamsNoNFT = utils.getPaymasterParams(PAYMASTER_ADDRESS, {
+    type: "ApprovalBased",
+    token: TOKEN_ADDRESS,
+    // set minimalAllowance to the estimated fee in erc20
+    minimalAllowance: ethers.BigNumber.from(usdFeeNoNFT),
+    // empty bytes as testnet paymaster does not use innerInput
+    innerInput: new Uint8Array(),
+  });
+
+  await (
+    await greeter
+      .connect(emptyWalletNONFT)
+      .setGreeting("This Greeting Cost USDC", {
+        // specify gas values
+        maxFeePerGas: gasPriceNoNFT,
+        maxPriorityFeePerGas: 0,
+        gasLimit: gasLimitNoNFT,
+        // paymaster info
+        customData: {
+          paymasterParams: paymasterParamsNoNFT,
+          gasPerPubdata: utils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
+        },
+      })
+  ).wait();
+  /************************************************/
+  
+  // Check latest Message from the contract
+  console.log(`--Latest message in contract from 2nd wallet now is: ${await greeterNoNFT.greet()}`);
+
+  //Check balances
+  const newERC20BalanceWithNFT = await emptyWalletWithNFT.getBalance(TOKEN_ADDRESS);
+  const newERC20BalanceNoNFT = await emptyWalletNONFT.getBalance(TOKEN_ADDRESS);
+  
+  //Log out the balances of USDC used for the transaction
+  console.log("------------ Ending Result ----------------");
+  console.log(`USDC Balance of the wallet holding the NFT after tx: ${newERC20BalanceWithNFT}`);
+  console.log(`Transaction fee paid in USDC was ${erc20Balance.sub(newERC20BalanceWithNFT)}`);
+
+  console.log(`USDC Balance of the wallet with NO NFT after tx: ${newERC20BalanceNoNFT}`);
+  console.log(`Transaction fee paid in USDC was ${erc20BalanceNoNFT.sub(newERC20BalanceNoNFT)}`);
+  console.log("-------------------------------------------");
+
+  
 }

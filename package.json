@@ -21,5 +21,10 @@
   "dependencies": {
     "@api3/contracts": "^0.9.1",
     "dotenv": "^16.3.1"
+  },
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat deploy-zksync --script deploy-paymaster.ts",
+    "usePaymaster": "hardhat deploy-zksync --script use-paymaster.ts"
   }
 }

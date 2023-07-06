@@ -14,10 +14,15 @@ export default async function (hre: HardhatRuntimeEnvironment) {
   // ⚠️ Never commit private keys to file tracking history, or your account could be compromised.
 
   const wallet = new Wallet(PRIVATE_KEY);
-  // The wallet that will receive ERC20 tokens
+  // The wallet that will receive ERC20 & ERC1155 tokens
   const emptyWallet = Wallet.createRandom();
-  console.log(`Empty wallet's address: ${emptyWallet.address}`);
-  console.log(`Empty wallet's private key: ${emptyWallet.privateKey}`);
+  console.log(`Empty wallet w/ NFT's address: ${emptyWallet.address}`);
+  console.log(`Empty wallet w/ NFT's private key: ${emptyWallet.privateKey}`);
+
+  // The wallet that will just receive ERC20 tokens and will pay gas
+  const emptyWalletNoNFT = Wallet.createRandom();
+  console.log(`Empty wallet's address: ${emptyWalletNoNFT.address}`);
+  console.log(`Empty wallet's private key: ${emptyWalletNoNFT.privateKey}`);
 
   const deployer = new Deployer(hre, wallet);
 
@@ -57,16 +62,18 @@ export default async function (hre: HardhatRuntimeEnvironment) {
   const deployGreeter = await deployer.deploy(greeterContractArtifact, [oldGreeting]);
   console.log(`Greeter contract address: ${deployGreeter.address}`);
 
-  // Supplying the ERC20 tokens to the empty wallet:
-  await // We will give the empty wallet 5k mUSDC:
+  // Supplying the ERC20 tokens to the empty wallets:
+  await // We will give the empty wallet with the NFT 5k mUSDC:
   (await erc20.mint(emptyWallet.address, "5000000000000000000000")).wait();
+  console.log("Minted 5k mUSDC for the empty wallet with NFT");
 
-  console.log("Minted 5k mUSDC for the empty wallet");
+  await
+  (await erc20.mint(emptyWalletNoNFT.address, "5000000000000000000000")).wait();
+  console.log("Minted 5k mUSDC for the empty wallet not holding an NFT");
 
   await // We will give the empty wallet a VIP NFT:
-  (await erc1155._mint(emptyWallet.address)).wait();
-
-  console.log("Minted a VIP NFT for the empty wallet");
+  (await erc1155.mint(emptyWallet.address)).wait();
+  console.log("Minted a VIP NFT for the empty wallet with NFT");
   
 
   console.log(`Done!`);
