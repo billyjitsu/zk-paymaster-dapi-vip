@@ -4,6 +4,7 @@ pragma solidity ^0.8.8;
 interface INFT {
     function balanceOf(address owner, uint256 id) external view returns (uint256 balance);
 }
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {IPaymaster, ExecutionResult, PAYMASTER_VALIDATION_SUCCESS_MAGIC} from "@matterlabs/zksync-contracts/l2/system-contracts/interfaces/IPaymaster.sol";
@@ -15,13 +16,13 @@ import "@api3/contracts/v0.8/interfaces/IProxy.sol";
 import "@matterlabs/zksync-contracts/l2/system-contracts/Constants.sol";
 
 contract MyPaymaster is IPaymaster, Ownable {
+    
     address public allowedToken;
     address public USDCdAPIProxy;
     address public ETHdAPIProxy;
-    uint256 public requiredETH;
     INFT VIP;
 
-    //Only the bootloader is allowed to call the validateAndPayForPaymasterTransaction and postTransaction functions.
+    // Allow list to call the functions of this contract
     modifier onlyBootloader() {
         require(
             msg.sender == BOOTLOADER_FORMAL_ADDRESS,
@@ -36,13 +37,9 @@ contract MyPaymaster is IPaymaster, Ownable {
         VIP = INFT(_vipNFT);
     }
 
-    // Set dapi proxies for the allowed token/s
-    function setDapiProxy(
-        address _USDCproxy,
-        address _ETHproxy
-    ) public onlyOwner {
-        USDCdAPIProxy = _USDCproxy;
-        ETHdAPIProxy = _ETHproxy;
+    function setDapiProxy(address _usdc, address _eth) external onlyOwner {
+        USDCdAPIProxy = _usdc;
+        ETHdAPIProxy = _eth;
     }
 
     function readDapi(address _dapiProxy) public view returns (uint256) {
@@ -52,8 +49,8 @@ contract MyPaymaster is IPaymaster, Ownable {
     }
 
     function validateAndPayForPaymasterTransaction(
-        bytes32,
-        bytes32,
+        bytes32, // hash of the transaction _txHash
+        bytes32, // hash of the transaction signed by the EOA _suggestedSignedHash
         Transaction calldata _transaction
     )
         external
@@ -62,16 +59,16 @@ contract MyPaymaster is IPaymaster, Ownable {
         returns (bytes4 magic, bytes memory context)
     {
         // By default we consider the transaction as accepted.
-        magic = PAYMASTER_VALIDATION_SUCCESS_MAGIC;
+        magic = PAYMASTER_VALIDATION_SUCCESS_MAGIC;  // constant default value
         require(
             _transaction.paymasterInput.length >= 4,
-            "The standard paymaster input must be at least 4 bytes long"
+            "The standard paymaster input must be at least 4 bytes long"  //Paymaster parameters are encoded before sending the transaction using zksync-web3
         );
 
         bytes4 paymasterInputSelector = bytes4(
             _transaction.paymasterInput[0:4]
         );
-        if (paymasterInputSelector == IPaymasterFlow.approvalBased.selector) {
+        if (paymasterInputSelector == IPaymasterFlow.approvalBased.selector) {  // Two types of paymaster flows are supported: approvalBased and general
             // While the transaction data consists of address, uint256 and bytes data,
             // the data is not needed for this paymaster
             (address token, uint256 amount, bytes memory data) = abi.decode(
@@ -91,53 +88,54 @@ contract MyPaymaster is IPaymaster, Ownable {
                 userAddress,
                 thisAddress
             );
-            // Read values from the dAPIs
+
+            // Note, that while the minimal amount of ETH needed is tx.gasPrice * tx.gasLimit,
+            // neither paymaster nor account are allowed to access this context variable.
+            uint256 requiredETH = _transaction.gasLimit *
+                _transaction.maxFeePerGas;
 
             uint256 ETHUSDCPrice = readDapi(ETHdAPIProxy);
             uint256 USDCUSDPrice = readDapi(USDCdAPIProxy);
 
-            requiredETH = _transaction.gasLimit * _transaction.maxFeePerGas;
-
-            // Calculate the required ERC20 tokens to be sent to the paymaster
-            // (Equal to the value of requiredETH)
-
             uint256 requiredERC20 = (requiredETH * ETHUSDCPrice) / USDCUSDPrice;
+
             require(
                 providedAllowance >= requiredERC20,
-                "Min paying allowance too low"
+                "Min allowance too low"
             );
 
-            // Note, that while the minimal amount of ETH needed is tx.gasPrice * tx.gasLimit,
-            // neither paymaster nor account are allowed to access this context variable.
-
-            //check balance from NFT to give a free transaction
-            if (VIP.balanceOf(userAddress, 1) > 0) {
-                // Burn NFT.. requires allowance
-            } 
+            if(VIP.balanceOf(userAddress, 1) > 0){
+                // Burn NFT .. require approval
+            }
             else {
-                try
-                    IERC20(token).transferFrom(userAddress, thisAddress, requiredERC20)
-                {} catch (bytes memory revertReason) {
-                    // If the revert reason is empty or represented by just a function selector,
-                    // we replace the error with a more user-friendly message
-                    if (requiredERC20 > amount) {
-                        revert("Not the required amount of tokens sent");
-                    }
-                    if (revertReason.length <= 4) {
-                        revert("Failed to transferFrom from users' account");
-                    } else {
-                        assembly {
-                            revert(add(0x20, revertReason), mload(revertReason))
-                        }
+
+            try
+                IERC20(token).transferFrom(userAddress, thisAddress, requiredERC20)
+            {} catch (bytes memory revertReason) {
+                // If the revert reason is empty or represented by just a function selector,
+                // we replace the error with a more user-friendly message
+                if(requiredERC20 > amount){
+                    revert("Not the required amount of tokens sent");
+                }
+                if (revertReason.length <= 4) {
+                    revert("Failed to transferFrom from users' account");
+                } else {
+                    assembly {
+                        revert(add(0x20, revertReason), mload(revertReason))
                     }
                 }
             }
+            }
 
             // The bootloader never returns any data, so it can safely be ignored here.
-            (bool success, ) = payable(BOOTLOADER_FORMAL_ADDRESS).call{value: requiredETH}("");
-            require(success, "Failed to transfer funds to the bootloader");
-        } 
-        else {
+            (bool success, ) = payable(BOOTLOADER_FORMAL_ADDRESS).call{
+                value: requiredETH
+            }("");
+            require(
+                success,
+                "Failed to transfer tx fee to the bootloader. Paymaster balance might not be enough."
+            );
+        } else {
             revert("Unsupported paymaster flow");
         }
     }
@@ -149,9 +147,7 @@ contract MyPaymaster is IPaymaster, Ownable {
         bytes32,
         ExecutionResult _txResult,
         uint256 _maxRefundedGas
-    ) external payable override onlyBootloader {
-        // Refunds are not supported yet.
-    }
+    ) external payable override onlyBootloader {}
 
     receive() external payable {}
 }

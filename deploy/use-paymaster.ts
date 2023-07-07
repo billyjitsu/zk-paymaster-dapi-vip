@@ -191,12 +191,6 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     "0x946E3232Cc18E812895A8e83CaE3d0caA241C2AB"
   );
 
-  // Checks old allowance (for testing purposes):
-  const checkSetAllowanceNoNFT = await erc20NoNFT.allowance(
-    emptyWalletNONFT.address,
-    PAYMASTER_ADDRESS
-  );
-
   // Calculating the USD fee:
   const usdFeeNoNFT = feeNoNFT.mul(ETHUSDNONFT).div(USDCUSDNONFT);
   console.log(`Estimated USD FEE: ${usdFeeNoNFT}`);
